@@ -1,17 +1,17 @@
 import { motion, AnimatePresence } from "framer-motion";
 
 const RISK_ICONS = {
-  high:        "🔴",
-  medium:      "🟡",
+  high:         "🔴",
+  medium:       "🟡",
   "low-medium": "🟠",
-  low:         "🟢",
-  unknown:     "⚪",
+  low:          "🟢",
+  unknown:      "⚪",
 };
 
 const SENSOR_LABELS = {
-  bodyTemp: "Body Temp",
-  ph:       "pH",
-  moisture: "Moisture",
+  bodyTemp: { label: "Body Temp", unit: "°C" },
+  ph:       { label: "pH",        unit: "pH" },
+  moisture: { label: "Moisture",  unit: "%"  },
 };
 
 export default function InfectionBanner({ infection }) {
@@ -37,87 +37,118 @@ export default function InfectionBanner({ infection }) {
             : "0 4px 20px rgba(0,0,0,0.3)",
         }}
       >
-        {/* Top row */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "10px" }}>
+        {/* ── Top row ───────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
 
-          {/* Left — risk level + type */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            {/* Pulsing dot */}
+          {/* Left — pulsing dot + risk label + type + description */}
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", flex: 1 }}>
             <motion.div
-              style={{ width: "12px", height: "12px", borderRadius: "50%", background: infection.dot, flexShrink: 0 }}
+              style={{ width: "12px", height: "12px", borderRadius: "50%", background: infection.dot, flexShrink: 0, marginTop: "3px" }}
               animate={infection.riskLevel === "high"
-                ? { scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }
+                ? { scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }
                 : { opacity: [1, 0.4, 1] }}
               transition={{ repeat: Infinity, duration: infection.riskLevel === "high" ? 0.8 : 2 }}
             />
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", fontFamily: "'DM Mono', monospace", color: infection.color }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px", flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: "11px", fontWeight: 700,
+                  letterSpacing: "0.1em", fontFamily: "'DM Mono', monospace",
+                  color: infection.color,
+                }}>
                   {infection.riskLabel}
                 </span>
-                <span style={{ fontSize: "11px", color: "#475569", fontFamily: "'DM Mono', monospace" }}>·</span>
-                <span style={{ fontSize: "13px", fontWeight: 600, color: "#e2e8f0" }}>
+                <span style={{ color: "#334155", fontFamily: "'DM Mono', monospace", fontSize: "11px" }}>·</span>
+                <span style={{ fontSize: "14px", fontWeight: 600, color: "#e2e8f0" }}>
                   {icon} {infection.type}
                 </span>
               </div>
-              <p style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px", lineHeight: 1.5 }}>
+              <p style={{ fontSize: "12px", color: "#94a3b8", lineHeight: 1.6, margin: 0 }}>
                 {infection.description}
               </p>
             </div>
           </div>
 
-          {/* Right — sensor freshness indicators */}
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {Object.entries(SENSOR_LABELS).map(([key, label]) => {
-              const isFresh = infection.freshSensors?.[key];
-              const val     = infection.available?.[key];
+          {/* Right — sensor pills */}
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "flex-start" }}>
+            {Object.entries(SENSOR_LABELS).map(([key, meta]) => {
+              const isFresh   = infection.freshSensors?.[key];
+              const val       = infection.available?.[key];
+              const isUsed    = val !== null && val !== undefined;
+              const isStale   = !isFresh;
+              const isInvalid = isFresh && !isUsed; // fresh but out of range
+
+              let bg, border, color, dotColor, statusText;
+
+              if (isUsed) {
+                // Fresh and valid — being used in prediction
+                bg = "rgba(34,197,94,0.08)"; border = "#14532d";
+                color = "#86efac"; dotColor = "#22c55e";
+                statusText = "USED";
+              } else if (isStale) {
+                // Stale — not used
+                bg = "rgba(100,116,139,0.08)"; border = "#1e293b";
+                color = "#475569"; dotColor = "#334155";
+                statusText = "STALE";
+              } else {
+                // Fresh but invalid value
+                bg = "rgba(239,68,68,0.08)"; border = "#7f1d1d";
+                color = "#fca5a5"; dotColor = "#ef4444";
+                statusText = "INVALID";
+              }
+
               return (
-                <div
-                  key={key}
-                  style={{
-                    padding: "4px 10px", borderRadius: "999px",
-                    fontSize: "10px", fontFamily: "'DM Mono', monospace",
-                    background: isFresh ? "rgba(34,197,94,0.08)" : "rgba(100,116,139,0.1)",
-                    border: `1px solid ${isFresh ? "#14532d" : "#1e293b"}`,
-                    color: isFresh ? "#86efac" : "#475569",
-                    display: "flex", alignItems: "center", gap: "4px",
-                  }}
-                >
-                  <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: isFresh ? "#22c55e" : "#334155" }} />
-                  {label}
-                  {val !== null && val !== undefined
-                    ? <span style={{ color: isFresh ? "#4ade80" : "#475569", marginLeft: "2px" }}>
-                        {typeof val === "number" ? val.toFixed(1) : val}
-                      </span>
-                    : <span style={{ color: "#334155", marginLeft: "2px" }}>—</span>
-                  }
+                <div key={key} style={{
+                  padding: "5px 10px", borderRadius: "10px",
+                  fontSize: "10px", fontFamily: "'DM Mono', monospace",
+                  background: bg, border: `1px solid ${border}`, color,
+                  display: "flex", flexDirection: "column", gap: "2px",
+                  minWidth: "72px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: dotColor }} />
+                    <span>{meta.label}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 700, color }}>
+                      {isUsed
+                        ? `${typeof val === "number" ? val.toFixed(1) : val}${meta.unit}`
+                        : "—"
+                      }
+                    </span>
+                    <span style={{ fontSize: "9px", opacity: 0.7 }}>{statusText}</span>
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* Partial data warning */}
+        {/* ── Partial data warning ──────────────────────────── */}
         {infection.partial && !infection.noData && (
-          <div style={{
-            marginTop: "8px", padding: "6px 12px", borderRadius: "8px",
-            background: "rgba(245,158,11,0.06)", border: "1px solid #422006",
-            fontSize: "11px", color: "#92400e", fontFamily: "'DM Mono', monospace",
-            display: "flex", alignItems: "center", gap: "6px",
-          }}>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            style={{
+              marginTop: "10px", padding: "6px 12px", borderRadius: "8px",
+              background: "rgba(245,158,11,0.06)", border: "1px solid #422006",
+              fontSize: "11px", color: "#92400e",
+              fontFamily: "'DM Mono', monospace",
+              display: "flex", alignItems: "center", gap: "6px",
+            }}
+          >
             <span>⚠</span>
-            Prediction based on partial data — some sensors have stale or missing readings
-          </div>
+            Partial prediction — only sensors marked USED are contributing.
+            Stale or invalid sensors are excluded.
+          </motion.div>
         )}
 
-        {/* No data state */}
+        {/* ── No data state ─────────────────────────────────── */}
         {infection.noData && (
           <div style={{
-            fontSize: "11px", color: "#475569",
-            fontFamily: "'DM Mono', monospace",
-            textAlign: "center", padding: "4px 0",
+            marginTop: "8px", fontSize: "11px", color: "#334155",
+            fontFamily: "'DM Mono', monospace", textAlign: "center",
           }}>
-            Waiting for sensor data to begin infection analysis...
+            Waiting for device to send valid sensor readings...
           </div>
         )}
       </motion.div>

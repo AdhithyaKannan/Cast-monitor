@@ -3,19 +3,24 @@
  * ────────────────────────────
  * Uses latest available sensor readings (bodyTemp, ph, moisture)
  * to predict infection risk level and type.
- *
- * Handles partial data — works with any combination of sensors.
- * Marks sensors as stale if last reading is older than STALE_MS.
+ * Handles partial data, stale sensors, and out-of-range/invalid values.
  */
 
 const STALE_MS = 2 * 60 * 1000; // 2 minutes
 
-// ── Threshold definitions ─────────────────────────────────────
+// ── Valid sensor ranges (discard readings outside these) ──────
+const VALID_RANGES = {
+  bodyTemp: [25, 45],
+  ph:       [0,  14],
+  moisture: [0,  100],
+};
 
+// ── Threshold definitions ─────────────────────────────────────
 const TEMP_THRESHOLDS = {
-  normal:  [36.1, 37.5],
-  low:     [37.5, 38.5],
-  high:    38.5,
+  belowNormal: 36.1,
+  normal:      [36.1, 37.5],
+  lowFever:    [37.5, 38.5],
+  highFever:   38.5,
 };
 
 const PH_THRESHOLDS = {
@@ -26,174 +31,157 @@ const PH_THRESHOLDS = {
 
 const MOISTURE_THRESHOLDS = {
   normal: [30, 75],
-  high:   [75, 85],
+  high:   75,
   vhigh:  85,
 };
 
-// ── Individual sensor classifiers ─────────────────────────────
+// ── Validators ────────────────────────────────────────────────
+function isValid(key, val) {
+  if (val === null || val === undefined || isNaN(val)) return false;
+  const [min, max] = VALID_RANGES[key];
+  return val >= min && val <= max;
+}
 
+// ── Individual classifiers ────────────────────────────────────
 function classifyTemp(val) {
-  if (val > TEMP_THRESHOLDS.high)          return "high";
-  if (val >= TEMP_THRESHOLDS.low[0])       return "low";
-  if (val >= TEMP_THRESHOLDS.normal[0])    return "normal";
-  return "low"; // below normal — hypothermia risk
+  if (val >= TEMP_THRESHOLDS.highFever)      return "highFever";
+  if (val >= TEMP_THRESHOLDS.lowFever[0])    return "lowFever";
+  if (val >= TEMP_THRESHOLDS.normal[0])      return "normal";
+  return "belowNormal";
 }
 
 function classifyPh(val) {
-  if (val > PH_THRESHOLDS.high)            return "high";
-  if (val >= PH_THRESHOLDS.elevated[0])    return "elevated";
+  if (val >= PH_THRESHOLDS.high)             return "high";
+  if (val >= PH_THRESHOLDS.elevated[0])      return "elevated";
   return "normal";
 }
 
 function classifyMoisture(val) {
-  if (val >= MOISTURE_THRESHOLDS.vhigh)    return "vhigh";
-  if (val >= MOISTURE_THRESHOLDS.high[0])  return "high";
+  if (val >= MOISTURE_THRESHOLDS.vhigh)      return "vhigh";
+  if (val >= MOISTURE_THRESHOLDS.high)       return "high";
   return "normal";
 }
 
-// ── Main prediction function ──────────────────────────────────
+// ── Result builder helper ─────────────────────────────────────
+function result(riskLevel, riskLabel, type, description, colors) {
+  return { riskLevel, riskLabel, type, description, ...colors };
+}
 
-/**
- * @param {object} values      - { bodyTemp, ph, moisture, ... }
- * @param {object} lastUpdated - { bodyTemp: timestamp, ph: timestamp, ... }
- * @returns {object} prediction result
- */
+const COLORS = {
+  high:       { color: "#f87171", bg: "#2d0a0a", border: "#dc2626", dot: "#ef4444" },
+  medium:     { color: "#fbbf24", bg: "#2d1a00", border: "#d97706", dot: "#f59e0b" },
+  lowMedium:  { color: "#fb923c", bg: "#2d1200", border: "#c2410c", dot: "#f97316" },
+  low:        { color: "#4ade80", bg: "#052e16", border: "#16a34a", dot: "#22c55e" },
+  unknown:    { color: "#475569", bg: "#0f172a", border: "#1e293b", dot: "#475569" },
+};
+
+// ── Main prediction function ──────────────────────────────────
 export function predictInfection(values, lastUpdated) {
   const now = Date.now();
 
-  // Check staleness for each relevant sensor
+  // Check staleness
   const fresh = {
-    bodyTemp: lastUpdated.bodyTemp && (now - lastUpdated.bodyTemp) < STALE_MS,
-    ph:       lastUpdated.ph       && (now - lastUpdated.ph)       < STALE_MS,
-    moisture: lastUpdated.moisture && (now - lastUpdated.moisture) < STALE_MS,
+    bodyTemp: !!(lastUpdated.bodyTemp && (now - lastUpdated.bodyTemp) < STALE_MS),
+    ph:       !!(lastUpdated.ph       && (now - lastUpdated.ph)       < STALE_MS),
+    moisture: !!(lastUpdated.moisture && (now - lastUpdated.moisture) < STALE_MS),
   };
 
+  // Only use fresh AND valid values
   const available = {
-    bodyTemp: fresh.bodyTemp ? values.bodyTemp : null,
-    ph:       fresh.ph       ? values.ph       : null,
-    moisture: fresh.moisture ? values.moisture : null,
+    bodyTemp: fresh.bodyTemp && isValid("bodyTemp", values.bodyTemp) ? values.bodyTemp : null,
+    ph:       fresh.ph       && isValid("ph",       values.ph)       ? values.ph       : null,
+    moisture: fresh.moisture && isValid("moisture",  values.moisture) ? values.moisture  : null,
   };
 
   const availableCount = Object.values(available).filter(v => v !== null).length;
 
-  // No sensors available
+  // No valid sensors
   if (availableCount === 0) {
     return {
-      riskLevel:    "unknown",
-      riskLabel:    "NO DATA",
-      type:         "Awaiting sensor readings",
-      description:  "No fresh sensor data available.",
-      color:        "#475569",
-      bg:           "#0f172a",
-      border:       "#1e293b",
-      dot:          "#475569",
-      freshSensors: fresh,
-      partial:      false,
-      noData:       true,
+      riskLevel: "unknown", riskLabel: "NO DATA",
+      type: "Awaiting sensor readings",
+      description: "No valid sensor data available. Waiting for device readings.",
+      ...COLORS.unknown,
+      freshSensors: fresh, available, partial: false, noData: true,
     };
   }
 
-  // Classify each available sensor
-  const tc = available.bodyTemp !== null ? classifyTemp(available.bodyTemp)     : null;
-  const pc = available.ph       !== null ? classifyPh(available.ph)             : null;
+  const tc = available.bodyTemp !== null ? classifyTemp(available.bodyTemp)    : null;
+  const pc = available.ph       !== null ? classifyPh(available.ph)            : null;
   const mc = available.moisture !== null ? classifyMoisture(available.moisture) : null;
 
   const partial = availableCount < 3;
 
-  // ── Prediction rules (priority order) ────────────────────────
+  let prediction;
 
-  let riskLevel, riskLabel, type, description, color, bg, border, dot;
+  // ── HIGH RISK ─────────────────────────────────────────────
+  if (tc === "highFever" && pc === "high" && mc === "vhigh") {
+    prediction = result("high", "HIGH RISK", "Bacterial Infection",
+      "Elevated temperature, alkaline wound pH, and excessive moisture — strong indicators of bacterial infection.",
+      COLORS.high);
 
-  // HIGH RISK rules
-  if (tc === "high" && pc === "high" && mc === "vhigh") {
-    riskLevel   = "high";
-    riskLabel   = "HIGH RISK";
-    type        = "Bacterial Infection";
-    description = "Elevated temperature, alkaline wound pH, and excessive moisture — strong indicators of bacterial infection.";
-    color       = "#f87171"; bg = "#2d0a0a"; border = "#dc2626"; dot = "#ef4444";
+  } else if (tc === "highFever" && pc === "high") {
+    prediction = result("high", "HIGH RISK", "Inflammatory Infection",
+      "High fever combined with elevated wound pH suggests active inflammatory infection.",
+      COLORS.high);
 
-  } else if (tc === "high" && pc === "high") {
-    riskLevel   = "high";
-    riskLabel   = "HIGH RISK";
-    type        = "Inflammatory Infection";
-    description = "High fever combined with elevated wound pH suggests active inflammatory infection.";
-    color       = "#f87171"; bg = "#2d0a0a"; border = "#dc2626"; dot = "#ef4444";
-
-  } else if (tc === "high" && mc === "vhigh") {
-    riskLevel   = "high";
-    riskLabel   = "HIGH RISK";
-    type        = "Wound Infection";
-    description = "High fever with excessive wound moisture — likely wound infection.";
-    color       = "#f87171"; bg = "#2d0a0a"; border = "#dc2626"; dot = "#ef4444";
+  } else if (tc === "highFever" && mc === "vhigh") {
+    prediction = result("high", "HIGH RISK", "Wound Infection",
+      "High fever with excessive wound moisture — likely active wound infection.",
+      COLORS.high);
 
   } else if (pc === "high" && mc === "vhigh") {
-    riskLevel   = "high";
-    riskLabel   = "HIGH RISK";
-    type        = "Fungal / Bacterial Infection";
-    description = "Alkaline wound pH with very high moisture — favourable environment for fungal or bacterial growth.";
-    color       = "#f87171"; bg = "#2d0a0a"; border = "#dc2626"; dot = "#ef4444";
+    prediction = result("high", "HIGH RISK", "Fungal / Bacterial Infection",
+      "Alkaline wound pH with very high moisture — favourable environment for fungal or bacterial growth.",
+      COLORS.high);
 
-  // MEDIUM RISK rules
-  } else if (tc === "low" && pc === "elevated" && mc === "high") {
-    riskLevel   = "medium";
-    riskLabel   = "MEDIUM RISK";
-    type        = "Fungal Infection Risk";
-    description = "Low-grade fever, slightly elevated pH, and high moisture — conditions favour fungal infection.";
-    color       = "#fbbf24"; bg = "#2d1a00"; border = "#d97706"; dot = "#f59e0b";
+  // ── MEDIUM RISK ───────────────────────────────────────────
+  } else if (tc === "lowFever" && pc === "elevated" && mc === "high") {
+    prediction = result("medium", "MEDIUM RISK", "Fungal Infection Risk",
+      "Low-grade fever, slightly elevated pH, and high moisture — conditions favour fungal infection.",
+      COLORS.medium);
 
-  } else if (tc === "low" && pc === "elevated") {
-    riskLevel   = "medium";
-    riskLabel   = "MEDIUM RISK";
-    type        = "Early Infection Risk";
-    description = "Low-grade fever with elevated wound pH — early signs of infection. Monitor closely.";
-    color       = "#fbbf24"; bg = "#2d1a00"; border = "#d97706"; dot = "#f59e0b";
+  } else if (tc === "lowFever" && pc === "elevated") {
+    prediction = result("medium", "MEDIUM RISK", "Early Infection Risk",
+      "Low-grade fever with elevated wound pH — early signs of infection. Monitor closely.",
+      COLORS.medium);
 
-  } else if (tc === "high" && pc === "normal") {
-    riskLevel   = "medium";
-    riskLabel   = "MEDIUM RISK";
-    type        = "Systemic Fever";
-    description = "High body temperature but normal wound pH — possible systemic fever unrelated to wound.";
-    color       = "#fbbf24"; bg = "#2d1a00"; border = "#d97706"; dot = "#f59e0b";
+  } else if (tc === "highFever" && pc === "normal") {
+    prediction = result("medium", "MEDIUM RISK", "Systemic Fever",
+      "High body temperature but normal wound pH — possible systemic fever unrelated to wound.",
+      COLORS.medium);
 
   } else if (pc === "high") {
-    riskLevel   = "medium";
-    riskLabel   = "MEDIUM RISK";
-    type        = "pH Imbalance";
-    description = "Wound pH is highly alkaline — may indicate infection or chemical imbalance at wound site.";
-    color       = "#fbbf24"; bg = "#2d1a00"; border = "#d97706"; dot = "#f59e0b";
+    prediction = result("medium", "MEDIUM RISK", "pH Imbalance",
+      "Wound pH is highly alkaline — may indicate infection or chemical imbalance at wound site.",
+      COLORS.medium);
 
   } else if (mc === "vhigh") {
-    riskLevel   = "medium";
-    riskLabel   = "MEDIUM RISK";
-    type        = "Maceration Risk";
-    description = "Excessive wound moisture can break down surrounding tissue and create infection risk.";
-    color       = "#fbbf24"; bg = "#2d1a00"; border = "#d97706"; dot = "#f59e0b";
+    prediction = result("medium", "MEDIUM RISK", "Maceration Risk",
+      "Excessive wound moisture can break down surrounding tissue and create infection risk.",
+      COLORS.medium);
 
-  } else if (pc === "elevated" || mc === "high") {
-    riskLevel   = "low-medium";
-    riskLabel   = "LOW-MEDIUM";
-    type        = "Early Warning";
-    description = "Slightly elevated wound conditions. No immediate concern but worth monitoring.";
-    color       = "#fb923c"; bg = "#2d1200"; border = "#c2410c"; dot = "#f97316";
+  // ── LOW-MEDIUM ────────────────────────────────────────────
+  } else if (pc === "elevated" || mc === "high" || tc === "lowFever") {
+    prediction = result("low-medium", "LOW-MEDIUM", "Early Warning",
+      "Slightly elevated wound conditions — no immediate concern but worth monitoring.",
+      COLORS.lowMedium);
 
-  // LOW / NORMAL
+  // ── BELOW NORMAL TEMP (hypothermia / poor circulation) ───
+  } else if (tc === "belowNormal") {
+    prediction = result("low-medium", "LOW-MEDIUM", "Low Body Temperature",
+      "Body temperature below normal range — may indicate poor circulation at wound site.",
+      COLORS.lowMedium);
+
+  // ── ALL NORMAL ────────────────────────────────────────────
   } else {
-    riskLevel   = "low";
-    riskLabel   = "LOW RISK";
-    type        = "No Infection Detected";
-    description = "All monitored parameters are within normal range. Wound healing appears on track.";
-    color       = "#4ade80"; bg = "#052e16"; border = "#16a34a"; dot = "#22c55e";
+    prediction = result("low", "LOW RISK", "No Infection Detected",
+      "All monitored parameters are within normal range. Wound healing appears on track.",
+      COLORS.low);
   }
 
   return {
-    riskLevel,
-    riskLabel,
-    type,
-    description,
-    color,
-    bg,
-    border,
-    dot,
+    ...prediction,
     freshSensors: fresh,
     available,
     partial,

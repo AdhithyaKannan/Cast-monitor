@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 
 const STATUS = {
-  anomaly: { color: "#ef4444", label: "ANOMALY DETECTED",  dur: 0.8 },
+  anomaly: { color: "#ef4444", label: "CRITICAL ALERT",    dur: 0.8 },
   warning: { color: "#f59e0b", label: "ATTENTION REQUIRED", dur: 1.2 },
   good:    { color: "#22c55e", label: "ALL SYSTEMS NORMAL", dur: 2   },
 };
@@ -15,7 +15,6 @@ export default function SummaryBar({ overallStatus, time, sensorCount }) {
         <span style={{ color: cfg.color, fontSize: "13px", fontWeight: 600, fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em" }}>{cfg.label}</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px", color: "#475569", fontSize: "11px", fontFamily: "'DM Mono', monospace" }}>
-        <span>🤖 AI LEARNING</span>
         <span>📡 {sensorCount} SENSORS</span>
         <span>🕐 {time}</span>
         <motion.span style={{ padding: "2px 8px", borderRadius: "4px", background: "#0f2012", color: "#4ade80", border: "1px solid #14532d" }} animate={{ opacity: [1, 0.5, 1] }} transition={{ repeat: Infinity, duration: 1.8 }}>
