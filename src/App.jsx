@@ -3,26 +3,23 @@ import { SENSORS } from "./constants/sensors";
 import { useSensorData } from "./hooks/useSensorData";
 import {
   Header, SummaryBar, SensorCard,
-  AlertToast, MoistureStatusBadge,
+  AlertToast, MoistureStatusBadge, InfectionBanner,
 } from "./components";
 
 export default function App() {
   const {
-    values, histories, anomalies, confidences,
+    values, histories,
     moistureStatus, alerts, time,
     overallStatus, connectionStatus, lastUpdated,
-    dismissAlert,
+    infection, dismissAlert,
   } = useSensorData();
 
   return (
     <div style={{
-      minHeight: "100vh",
-      background: "#05080f",
+      minHeight: "100vh", background: "#05080f",
       fontFamily: "'Space Grotesk', sans-serif",
-      padding: "24px",
-      boxSizing: "border-box",
+      padding: "24px", boxSizing: "border-box",
     }}>
-      {/* Ambient background glow */}
       <div style={{
         position: "fixed", inset: 0, pointerEvents: "none",
         background:
@@ -34,24 +31,17 @@ export default function App() {
 
       <div style={{ position: "relative", maxWidth: "1400px", margin: "0 auto" }}>
 
-        <Header
-          time={time}
-          connectionStatus={connectionStatus}
-          lastUpdated={lastUpdated}
-        />
+        <Header time={time} connectionStatus={connectionStatus} lastUpdated={lastUpdated} />
 
-        <SummaryBar
-          overallStatus={overallStatus}
-          time={time}
-          sensorCount={SENSORS.length}
-        />
+        {/* ── Infection prediction banner ── */}
+        <InfectionBanner infection={infection} />
 
-        {/* 5 sensor gauge cards */}
+        <SummaryBar overallStatus={overallStatus} time={time} sensorCount={SENSORS.length} />
+
         <div style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: "16px",
-          marginBottom: "16px",
+          gap: "16px", marginBottom: "16px",
         }}>
           {SENSORS.map((sensor, i) => (
             <SensorCard
@@ -59,14 +49,11 @@ export default function App() {
               sensor={sensor}
               value={values[sensor.key]}
               history={histories[sensor.key]}
-              anomaly={anomalies[sensor.key]}
-              confidence={confidences[sensor.key] ?? 0}
               index={i}
             />
           ))}
         </div>
 
-        {/* Moisture digital status — full width */}
         <MoistureStatusBadge status={moistureStatus} />
 
         <motion.footer

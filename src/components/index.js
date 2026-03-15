@@ -7,3 +7,4 @@ export { default as AIBadge }             from "./AIBadge";
 export { default as ThresholdBar }        from "./ThresholdBar";
 export { default as AlertToast }          from "./AlertToast";
 export { default as MoistureStatusBadge } from "./MoistureStatusBadge";
+export { default as InfectionBanner }     from "./InfectionBanner";

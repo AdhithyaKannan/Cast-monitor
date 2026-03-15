@@ -50,7 +50,6 @@ export const SENSORS = [
     baseVal: 50,
     drift: 3,
     description: "Analog sensor — field4",
-    // Raw 0-1023, dry=high → convert to %
     transform: (raw) => Math.round(100 - (parseFloat(raw) / 1023) * 100),
   },
   {
@@ -59,10 +58,10 @@ export const SENSORS = [
     unit: "pH",
     icon: "⚗️",
     min: 0, max: 14,
-    thresholds: { low: 6, high: 8.5 },
-    safe: [6.5, 7.5],
+    thresholds: { low: 4.0, high: 5.5 },
+    safe: [4.0, 5.5],
     color: "#a78bfa",
-    baseVal: 9.6,
+    baseVal: 4.8,
     drift: 0.2,
     description: "pH sensor — field6",
   },

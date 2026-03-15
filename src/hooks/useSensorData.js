@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Pusher from "pusher-js";
 import { SENSORS } from "../constants/sensors";
 import { PUSHER_CONFIG, PUSHER_CHANNEL, PUSHER_EVENT } from "../constants/pusher";
-import { AnomalyDetector } from "../utils/AnomalyDetector";
+import { predictInfection } from "../utils/infectionEngine";
 
 const HISTORY_LENGTH = 50;
-const detector = new AnomalyDetector(40, 2.5);
 
 export function useSensorData() {
   const [values, setValues] = useState(() =>
@@ -14,59 +13,59 @@ export function useSensorData() {
   const [histories, setHistories] = useState(() =>
     Object.fromEntries(SENSORS.map((s) => [s.key, [s.baseVal]]))
   );
-  const [anomalies, setAnomalies] = useState(() =>
-    Object.fromEntries(SENSORS.map((s) => [s.key, false]))
+  // Track when each sensor last received fresh data
+  const [sensorTimestamps, setSensorTimestamps] = useState(() =>
+    Object.fromEntries(SENSORS.map((s) => [s.key, null]))
   );
-  const [confidences, setConfidences] = useState(() =>
-    Object.fromEntries(SENSORS.map((s) => [s.key, 0]))
-  );
-  const [moistureStatus, setMoistureStatus] = useState(null);
-  const [alerts, setAlerts] = useState([]);
-  const [time, setTime] = useState(() => new Date().toLocaleTimeString());
+  const [moistureStatus, setMoistureStatus]   = useState(null);
+  const [alerts, setAlerts]                   = useState([]);
+  const [time, setTime]                       = useState(() => new Date().toLocaleTimeString());
   const [connectionStatus, setConnectionStatus] = useState("connecting");
-  const [lastUpdated, setLastUpdated] = useState(null);
-
-  const alertIdRef = useRef(0);
+  const [lastUpdated, setLastUpdated]         = useState(null);
+  const [infection, setInfection]             = useState(null);
 
   const dismissAlert = useCallback((id) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  // Process incoming sensor payload from Pusher
   const processPayload = useCallback((data) => {
-    // data shape: { humidity, envTemp, bodyTemp, moisture, ph, moistureStatus, timestamp }
-    const newValues = {};
-    const newAnomalies = {};
-    const newConfidences = {};
-    const freshAlerts = [];
+    const newValues      = {};
+    const newTimestamps  = {};
+    const now            = Date.now();
 
     SENSORS.forEach((s) => {
       const raw = data[s.key];
       if (raw === undefined || raw === null) return;
       const v = s.transform ? s.transform(raw) : parseFloat(raw);
       if (isNaN(v)) return;
-
-      newValues[s.key] = v;
-      detector.feed(s.key, v);
-      newAnomalies[s.key] = detector.isAnomaly(s.key, v);
-      newConfidences[s.key] = detector.getConfidence(s.key);
-
-      if (newAnomalies[s.key]) {
-        freshAlerts.push({
-          id: ++alertIdRef.current,
-          sensorKey: s.key,
-          label: s.label,
-          message: `Value ${v}${s.unit} — AI anomaly detected`,
-          timestamp: new Date().toLocaleTimeString(),
-        });
-      }
+      newValues[s.key]     = v;
+      newTimestamps[s.key] = now;
     });
 
     if (data.moistureStatus !== undefined) {
       setMoistureStatus(parseInt(data.moistureStatus));
     }
 
-    setValues((prev) => ({ ...prev, ...newValues }));
+    setValues((prev) => {
+      const merged = { ...prev, ...newValues };
+
+      // Run infection prediction with latest merged values + updated timestamps
+      setSensorTimestamps((prevTs) => {
+        const mergedTs = { ...prevTs, ...newTimestamps };
+
+        const prediction = predictInfection(merged, {
+          bodyTemp: mergedTs.bodyTemp,
+          ph:       mergedTs.ph,
+          moisture: mergedTs.moisture,
+        });
+        setInfection(prediction);
+
+        return mergedTs;
+      });
+
+      return merged;
+    });
+
     setHistories((h) => {
       const nh = { ...h };
       SENSORS.forEach((s) => {
@@ -75,36 +74,28 @@ export function useSensorData() {
       });
       return nh;
     });
-    setAnomalies((prev) => ({ ...prev, ...newAnomalies }));
-    setConfidences((prev) => ({ ...prev, ...newConfidences }));
-    setTime(new Date().toLocaleTimeString());
-    setLastUpdated(data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString());
-    setConnectionStatus("live");
 
-    if (freshAlerts.length) {
-      setAlerts((a) => [...a, ...freshAlerts].slice(-4));
-      const ids = freshAlerts.map((fa) => fa.id);
-      setTimeout(() => setAlerts((a) => a.filter((al) => !ids.includes(al.id))), 6000);
-    }
+    setTime(new Date().toLocaleTimeString());
+    setLastUpdated(
+      data.timestamp
+        ? new Date(data.timestamp).toLocaleTimeString()
+        : new Date().toLocaleTimeString()
+    );
+    setConnectionStatus("live");
   }, []);
 
   useEffect(() => {
-    detector.warmup(SENSORS, 20);
-
-    // Initialise Pusher
     const pusher = new Pusher(PUSHER_CONFIG.key, {
       cluster: PUSHER_CONFIG.cluster,
     });
 
     const channel = pusher.subscribe(PUSHER_CHANNEL);
 
-    // Connection state handlers
-    pusher.connection.bind("connecting", () => setConnectionStatus("connecting"));
-    pusher.connection.bind("connected",  () => setConnectionStatus("live"));
+    pusher.connection.bind("connecting",   () => setConnectionStatus("connecting"));
+    pusher.connection.bind("connected",    () => setConnectionStatus("live"));
     pusher.connection.bind("disconnected", () => setConnectionStatus("error"));
-    pusher.connection.bind("failed",     () => setConnectionStatus("error"));
+    pusher.connection.bind("failed",       () => setConnectionStatus("error"));
 
-    // Listen for sensor data
     channel.bind(PUSHER_EVENT, (data) => {
       processPayload(data);
     });
@@ -116,14 +107,22 @@ export function useSensorData() {
     };
   }, [processPayload]);
 
-  const anyAnomaly = Object.values(anomalies).some(Boolean);
-  const allGood = SENSORS.every((s) => !anomalies[s.key]);
-  const overallStatus = anyAnomaly ? "anomaly" : allGood ? "good" : "warning";
+  const overallStatus = (() => {
+    const statuses = SENSORS.map((s) => {
+      const v = values[s.key];
+      if (v < s.thresholds.low || v > s.thresholds.high) return "critical";
+      if (v < s.safe[0] || v > s.safe[1]) return "warning";
+      return "good";
+    });
+    if (statuses.includes("critical")) return "anomaly";
+    if (statuses.includes("warning"))  return "warning";
+    return "good";
+  })();
 
   return {
-    values, histories, anomalies, confidences,
+    values, histories, sensorTimestamps,
     moistureStatus, alerts, time,
     overallStatus, connectionStatus, lastUpdated,
-    dismissAlert,
+    infection, dismissAlert,
   };
 }
