@@ -15,7 +15,7 @@ export default function Header({ time, connectionStatus, lastUpdated }) {
         <div style={{ width: "40px", height: "40px", borderRadius: "12px", background: "linear-gradient(135deg, #1e3a5f 0%, #0ea5e9 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}>🩺</div>
         <div>
           <h1 style={{ fontSize: "clamp(18px, 4vw, 26px)", fontWeight: 700, color: "#e2e8f0", letterSpacing: "-0.025em", margin: 0 }}>
-            SmartBand<span style={{ color: "#38bdf8" }}>Monitor</span>
+            Cast-<span style={{ color: "#38bdf8" }}>IT</span>
           </h1>
           <p style={{ color: "#334155", fontSize: "10px", fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em", marginTop: "2px" }}>
             IoT FRACTURE HEALING · REAL-TIME SENSOR DASHBOARD
