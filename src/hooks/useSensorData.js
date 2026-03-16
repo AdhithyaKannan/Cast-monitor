@@ -1,16 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Pusher from "pusher-js";
 import { SENSORS } from "../constants/sensors";
 import { PUSHER_CONFIG, PUSHER_CHANNEL, PUSHER_EVENT } from "../constants/pusher";
 import { predictInfection } from "../utils/infectionEngine";
-import { filterIdleValues } from "../utils/idleFilter";
+import { isIdle } from "../utils/idleFilter";
 
 const HISTORY_LENGTH = 50;
 
-// Tracks the last REAL (non-idle) value per sensor key
-// Used by infection engine — only real readings count
-const lastRealValues = {};
-const lastRealTimestamps = {};
+// Last known REAL (non-idle) values — only used by infection engine
+const realValues     = {};
+const realTimestamps = {};
 
 export function useSensorData() {
   const [values, setValues] = useState(() =>
@@ -18,11 +17,6 @@ export function useSensorData() {
   );
   const [histories, setHistories] = useState(() =>
     Object.fromEntries(SENSORS.map((s) => [s.key, [s.baseVal]]))
-  );
-  // Which sensors are currently showing a held (non-real) value
-  const [heldSensors, setHeldSensors] = useState({});
-  const [sensorTimestamps, setSensorTimestamps] = useState(() =>
-    Object.fromEntries(SENSORS.map((s) => [s.key, null]))
   );
   const [moistureStatus, setMoistureStatus]     = useState(null);
   const [alerts, setAlerts]                     = useState([]);
@@ -36,77 +30,50 @@ export function useSensorData() {
   }, []);
 
   const processPayload = useCallback((data) => {
-    const now        = Date.now();
-    const rawValues  = {};
+    const now       = Date.now();
+    const newValues = {};
 
-    // Parse all sensor values from payload
+    // Parse every sensor value from payload — no filtering
     SENSORS.forEach((s) => {
       const raw = data[s.key];
       if (raw === undefined || raw === null) return;
       const v = s.transform ? s.transform(raw) : parseFloat(raw);
-      if (!isNaN(v)) rawValues[s.key] = v;
+      if (!isNaN(v)) newValues[s.key] = v;
     });
 
-    // Filter out idle readings — keep last known real value for idle sensors
-    const { filtered, skipped } = filterIdleValues(rawValues, lastRealValues);
-
-    if (skipped.length > 0) {
-      console.log("[IdleFilter] Skipped:", skipped);
-    }
-
-    // Track which sensors got real vs held values
-    const newHeld = {};
-    const newTimestamps = {};
-
+    // Separately track real values for infection engine only
     SENSORS.forEach((s) => {
-      const incomingRaw   = rawValues[s.key];
-      const incomingIsIdle = skipped.some(sk => sk.startsWith(s.key));
-
-      if (!incomingIsIdle && incomingRaw !== undefined) {
-        // Real reading — update lastRealValues and timestamp
-        lastRealValues[s.key]     = filtered[s.key];
-        lastRealTimestamps[s.key] = now;
-        newHeld[s.key]            = false;
-        newTimestamps[s.key]      = now;
-      } else if (lastRealValues[s.key] !== undefined) {
-        // Idle reading — holding last real value
-        newHeld[s.key]       = true;
-        newTimestamps[s.key] = lastRealTimestamps[s.key] || null;
+      const v = newValues[s.key];
+      if (v === undefined) return;
+      const { idle } = isIdle(s.key, v);
+      if (!idle) {
+        realValues[s.key]     = v;
+        realTimestamps[s.key] = now;
       }
     });
+
+    // Update infection engine with real values only
+    const prediction = predictInfection(realValues, realTimestamps);
+    setInfection(prediction);
 
     if (data.moistureStatus !== undefined) {
       setMoistureStatus(parseInt(data.moistureStatus));
     }
 
-    // Update displayed values
-    setValues((prev) => {
-      const merged = { ...prev };
-      Object.keys(filtered).forEach((k) => {
-        if (filtered[k] !== undefined) merged[k] = filtered[k];
-      });
+    // Dashboard gets every value instantly — no delay, no filtering
+    setValues((prev) => ({ ...prev, ...newValues }));
 
-      // Run infection prediction using ONLY real sensor timestamps
-      const prediction = predictInfection(merged, lastRealTimestamps);
-      setInfection(prediction);
-
-      return merged;
-    });
-
+    // History also updates with every real reading
     setHistories((h) => {
       const nh = { ...h };
       SENSORS.forEach((s) => {
-        // Only add to history if it was a real reading (not held)
-        const isHeld = newHeld[s.key];
-        if (!isHeld && filtered[s.key] !== undefined) {
-          nh[s.key] = [...(h[s.key] || []).slice(-(HISTORY_LENGTH - 1)), filtered[s.key]];
+        if (newValues[s.key] !== undefined) {
+          nh[s.key] = [...(h[s.key] || []).slice(-(HISTORY_LENGTH - 1)), newValues[s.key]];
         }
       });
       return nh;
     });
 
-    setHeldSensors((prev) => ({ ...prev, ...newHeld }));
-    setSensorTimestamps((prev) => ({ ...prev, ...newTimestamps }));
     setTime(new Date().toLocaleTimeString());
     setLastUpdated(
       data.timestamp
@@ -128,9 +95,7 @@ export function useSensorData() {
     pusher.connection.bind("disconnected", () => setConnectionStatus("error"));
     pusher.connection.bind("failed",       () => setConnectionStatus("error"));
 
-    channel.bind(PUSHER_EVENT, (data) => {
-      processPayload(data);
-    });
+    channel.bind(PUSHER_EVENT, (data) => processPayload(data));
 
     return () => {
       channel.unbind_all();
@@ -152,7 +117,7 @@ export function useSensorData() {
   })();
 
   return {
-    values, histories, heldSensors,
+    values, histories,
     moistureStatus, alerts, time,
     overallStatus, connectionStatus, lastUpdated,
     infection, dismissAlert,

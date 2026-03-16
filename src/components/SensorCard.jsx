@@ -6,7 +6,7 @@ import StatusBadge from "./AIBadge";
 import ThresholdBar from "./ThresholdBar";
 import { getStatus, getStatusColors } from "../utils/helpers";
 
-export default function SensorCard({ sensor, value, history, index, held }) {
+export default function SensorCard({ sensor, value, history, index }) {
   const [expanded, setExpanded] = useState(false);
   const status = getStatus(sensor, value);
   const sc     = getStatusColors(sensor, value);
@@ -25,7 +25,6 @@ export default function SensorCard({ sensor, value, history, index, held }) {
           : "0 4px 24px rgba(0,0,0,0.4)",
         transition: "border-color 0.4s, box-shadow 0.4s",
         boxSizing: "border-box",
-        opacity: held ? 0.75 : 1,
       }}
       whileHover={{ scale: 1.01 }}
       onClick={() => setExpanded(v => !v)}
@@ -41,23 +40,7 @@ export default function SensorCard({ sensor, value, history, index, held }) {
             <div style={{ fontSize: "11px", color: "#64748b" }}>{sensor.description}</div>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-          <StatusBadge sensor={sensor} value={value} />
-          {/* Held indicator — shows when displaying last known real value */}
-          {held && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              style={{
-                fontSize: "9px", fontFamily: "'DM Mono', monospace",
-                color: "#475569", background: "#0f172a",
-                border: "1px solid #1e293b", borderRadius: "4px",
-                padding: "2px 6px", letterSpacing: "0.05em",
-              }}
-            >
-              ⏸ HOLDING LAST REAL
-            </motion.div>
-          )}
-        </div>
+        <StatusBadge sensor={sensor} value={value} />
       </div>
 
       {/* Gauge */}
@@ -90,7 +73,7 @@ export default function SensorCard({ sensor, value, history, index, held }) {
       {/* Sparkline */}
       <div style={{ borderRadius: "10px", overflow: "hidden", background: "#060d1a", padding: "6px 4px 2px" }}>
         <div style={{ padding: "0 8px", marginBottom: "4px", color: "#475569", fontSize: "10px", fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em" }}>
-          {held ? "TREND — REAL READINGS ONLY" : `TREND — LAST ${history.length} READINGS`}
+          TREND — LAST {history.length} READINGS
         </div>
         <Sparkline data={history} sensor={sensor} />
       </div>

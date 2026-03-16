@@ -8,7 +8,7 @@ import {
 
 export default function App() {
   const {
-    values, histories, heldSensors,
+    values, histories,
     moistureStatus, alerts, time,
     overallStatus, connectionStatus, lastUpdated,
     infection, dismissAlert,
@@ -33,7 +33,6 @@ export default function App() {
 
         <Header time={time} connectionStatus={connectionStatus} lastUpdated={lastUpdated} />
 
-        {/* Infection prediction banner */}
         <InfectionBanner infection={infection} />
 
         <SummaryBar overallStatus={overallStatus} time={time} sensorCount={SENSORS.length} />
@@ -49,7 +48,6 @@ export default function App() {
               sensor={sensor}
               value={values[sensor.key]}
               history={histories[sensor.key]}
-              held={heldSensors[sensor.key] || false}
               index={i}
             />
           ))}
