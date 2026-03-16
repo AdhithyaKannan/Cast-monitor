@@ -10,7 +10,7 @@ export const SENSORS = [
     color: "#38bdf8",
     baseVal: 58,
     drift: 3,
-    description: "DHT11 — field1",
+    description: "Environmental humidity",
   },
   {
     key: "envTemp",
@@ -23,7 +23,7 @@ export const SENSORS = [
     color: "#34d399",
     baseVal: 30,
     drift: 1,
-    description: "DHT11 — field2",
+    description: "Environment temperature",
   },
   {
     key: "bodyTemp",
@@ -31,14 +31,12 @@ export const SENSORS = [
     unit: "°C",
     icon: "🌡️",
     min: 25, max: 47,
-    // No tolerance — critical if outside normal range in either direction
     thresholds: { low: 36.1, high: 38.5 },
     safe: [36.1, 38.5],
     color: "#fb923c",
-    baseVal: 30.69,
+    baseVal: 36.5,
     drift: 0.5,
-    description: "DS18B20 (+5°C offset)",
-    // Add 5°C offset to compensate for skin surface reading
+    description: "Body temperature",
     transform: (raw) => parseFloat(raw) + 5,
   },
   {
@@ -52,7 +50,7 @@ export const SENSORS = [
     color: "#67e8f9",
     baseVal: 50,
     drift: 3,
-    description: "Analog sensor — field4",
+    description: "Wound moisture level",
     transform: (raw) => Math.round(100 - (parseFloat(raw) / 1023) * 100),
   },
   {
@@ -66,7 +64,7 @@ export const SENSORS = [
     color: "#a78bfa",
     baseVal: 4.8,
     drift: 0.2,
-    description: "pH sensor — field6",
+    description: "Wound pH level",
   },
 ];
 

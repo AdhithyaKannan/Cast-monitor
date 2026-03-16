@@ -10,22 +10,14 @@ export function getStatus(sensor, value) {
   const [safeL, safeH] = sensor.safe;
   const { low, high }  = sensor.thresholds;
 
-  // Body temp special case — only flag critical/warning for HIGH values
-  // Low body temp = sensor not on skin, not a real health concern
-  if (sensor.key === "bodyTemp") {
-    if (value > high)  return "critical";
-    if (value > safeH) return "warning";
-    return "good";
-  }
-
-  // Moisture special case — 0 is normal, only flag HIGH values
+  // Moisture — 0% is fine, only flag when too high
   if (sensor.key === "moisture") {
     if (value > high)  return "critical";
     if (value > safeH) return "warning";
     return "good";
   }
 
-  // Default — flag both low and high
+  // All other sensors — flag BOTH too low and too high
   if (value < low || value > high) return "critical";
   if (value < safeL || value > safeH) return "warning";
   return "good";
