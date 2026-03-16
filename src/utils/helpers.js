@@ -5,8 +5,27 @@ export function clamp(value, min, max) {
 }
 
 export function getStatus(sensor, value) {
+  if (value === null || value === undefined || isNaN(value)) return "good";
+
   const [safeL, safeH] = sensor.safe;
-  const { low, high } = sensor.thresholds;
+  const { low, high }  = sensor.thresholds;
+
+  // Body temp special case — only flag critical/warning for HIGH values
+  // Low body temp = sensor not on skin, not a real health concern
+  if (sensor.key === "bodyTemp") {
+    if (value > high)  return "critical";
+    if (value > safeH) return "warning";
+    return "good";
+  }
+
+  // Moisture special case — 0 is normal, only flag HIGH values
+  if (sensor.key === "moisture") {
+    if (value > high)  return "critical";
+    if (value > safeH) return "warning";
+    return "good";
+  }
+
+  // Default — flag both low and high
   if (value < low || value > high) return "critical";
   if (value < safeL || value > safeH) return "warning";
   return "good";
