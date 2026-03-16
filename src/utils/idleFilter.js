@@ -2,56 +2,44 @@
  * Idle Filter
  * ────────────
  * Detects idle/disconnected sensor readings for the infection engine.
- * Dashboard still shows all values — this only affects infection prediction.
+ * Dashboard always shows raw values — this only affects infection prediction.
  *
- * Idle signatures:
- *   bodyTemp → below 32°C   = sensor not on skin (ignore for infection)
- *   ph       → above 8.5 or below 3.5 = not calibrated/in contact
- *   moisture → no idle state (0% is now a valid normal reading)
- *   humidity → no idle state
- *   envTemp  → no idle state
+ * Note: bodyTemp transform (+5°C) is applied BEFORE this check,
+ * so we compare against the already-offset value.
  */
 
-const IDLE_RULES = {
+const IDLE_RANGES = {
   bodyTemp: {
-    check:  (v) => v < 32,
-    reason: "Body temp below 32°C — sensor not on skin",
+    // Raw ~28°C + 5 offset = ~33°C — still below real body temp
+    // Real reading on skin/armpit/mouth will be 36°C+ after offset
+    check: (v) => v < 35,
+    reason: "Body temp below 35°C after offset — sensor not properly placed",
   },
   ph: {
-    check:  (v) => v > 8.5 || v < 3.5,
-    reason: "pH out of wound range — sensor not calibrated or not in contact",
+    check: (v) => v > 8.5 || v < 3.5,
+    reason: "pH out of wound range — sensor not in contact or uncalibrated",
   },
-  // moisture: no idle rule — 0% is valid normal reading
+  moisture: {
+    check: (v) => v <= 3,
+    reason: "Moisture too low — sensor not in contact",
+  },
 };
 
-/**
- * Check if a single sensor value is an idle reading.
- * @param {string} key
- * @param {number} value
- * @returns {{ idle: boolean, reason: string|null }}
- */
 export function isIdle(key, value) {
-  const rule = IDLE_RULES[key];
+  const rule = IDLE_RANGES[key];
   if (!rule) return { idle: false, reason: null };
-
   if (value === null || value === undefined || isNaN(value)) {
     return { idle: true, reason: "No value" };
   }
-
   if (rule.check(value)) {
     return { idle: true, reason: rule.reason };
   }
-
   return { idle: false, reason: null };
 }
 
-/**
- * Filter a full payload for infection engine use only.
- */
 export function filterIdleValues(newValues, lastKnown) {
   const filtered = {};
   const skipped  = [];
-
   Object.entries(newValues).forEach(([key, val]) => {
     const { idle, reason } = isIdle(key, val);
     if (idle) {
@@ -63,6 +51,5 @@ export function filterIdleValues(newValues, lastKnown) {
       filtered[key] = val;
     }
   });
-
   return { filtered, skipped };
 }

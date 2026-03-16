@@ -30,14 +30,16 @@ export const SENSORS = [
     label: "Body Temp",
     unit: "°C",
     icon: "🌡️",
-    min: 25, max: 42,
-    // Only flag HIGH temp as critical — low values are sensor issues
-    thresholds: { low: 25, high: 38 },  // low set to min so below-normal never triggers critical
-    safe: [36.1, 37.5],
+    min: 25, max: 47,
+    // No tolerance — critical if outside normal range in either direction
+    thresholds: { low: 36.1, high: 38.5 },
+    safe: [36.1, 38.5],
     color: "#fb923c",
-    baseVal: 36.5,
+    baseVal: 30.69,
     drift: 0.5,
-    description: "DS18B20 — field3",
+    description: "DS18B20 (+5°C offset)",
+    // Add 5°C offset to compensate for skin surface reading
+    transform: (raw) => parseFloat(raw) + 5,
   },
   {
     key: "moisture",
@@ -45,11 +47,10 @@ export const SENSORS = [
     unit: "%",
     icon: "🌊",
     min: 0, max: 100,
-    // 0 is normal, above 15% is critical
-    thresholds: { low: 0, high: 15 },
-    safe: [0, 10],
+    thresholds: { low: 20, high: 85 },
+    safe: [30, 75],
     color: "#67e8f9",
-    baseVal: 0,
+    baseVal: 50,
     drift: 3,
     description: "Analog sensor — field4",
     transform: (raw) => Math.round(100 - (parseFloat(raw) / 1023) * 100),
