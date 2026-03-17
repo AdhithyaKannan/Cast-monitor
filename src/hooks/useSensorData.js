@@ -6,8 +6,9 @@ import { predictInfection } from "../utils/infectionEngine";
 import { isIdle } from "../utils/idleFilter";
 
 const HISTORY_LENGTH = 50;
+const API_URL        = "https://cast-monitor.vercel.app/api/sensor";
+const DEVICE_SECRET  = "smartband_secret_2024";
 
-// Last known REAL (non-idle) values — only used by infection engine
 const realValues     = {};
 const realTimestamps = {};
 
@@ -33,7 +34,6 @@ export function useSensorData() {
     const now       = Date.now();
     const newValues = {};
 
-    // Parse every sensor value from payload — no filtering
     SENSORS.forEach((s) => {
       const raw = data[s.key];
       if (raw === undefined || raw === null) return;
@@ -41,7 +41,9 @@ export function useSensorData() {
       if (!isNaN(v)) newValues[s.key] = v;
     });
 
-    // Separately track real values for infection engine only
+    if (Object.keys(newValues).length === 0) return;
+
+    // Update real values for infection engine
     SENSORS.forEach((s) => {
       const v = newValues[s.key];
       if (v === undefined) return;
@@ -52,23 +54,21 @@ export function useSensorData() {
       }
     });
 
-    // Update infection engine with real values only
     const prediction = predictInfection(realValues, realTimestamps);
     setInfection(prediction);
 
-    if (data.moistureStatus !== undefined) {
+    if (data.moistureStatus !== undefined && data.moistureStatus !== null) {
       setMoistureStatus(parseInt(data.moistureStatus));
     }
 
-    // Dashboard gets every value instantly — no delay, no filtering
     setValues((prev) => ({ ...prev, ...newValues }));
 
-    // History also updates with every real reading
     setHistories((h) => {
       const nh = { ...h };
       SENSORS.forEach((s) => {
-        if (newValues[s.key] !== undefined) {
-          nh[s.key] = [...(h[s.key] || []).slice(-(HISTORY_LENGTH - 1)), newValues[s.key]];
+        const v = newValues[s.key];
+        if (v !== undefined && !isNaN(v)) {
+          nh[s.key] = [...(h[s.key] || []).slice(-(HISTORY_LENGTH - 1)), v];
         }
       });
       return nh;
@@ -84,10 +84,21 @@ export function useSensorData() {
   }, []);
 
   useEffect(() => {
-    const pusher = new Pusher(PUSHER_CONFIG.key, {
-      cluster: PUSHER_CONFIG.cluster,
-    });
+    // ── Keep Vercel function warm ─────────────────────────
+    // Pings every 10s so function never goes cold between readings
+    const keepWarm = setInterval(() => {
+      fetch(API_URL, {
+        method:  "POST",
+        headers: {
+          "Content-Type":    "application/json",
+          "x-device-secret": DEVICE_SECRET,
+        },
+        body: JSON.stringify({ ping: true }),
+      }).catch(() => {}); // silently ignore errors
+    }, 10000);
 
+    // ── Pusher real-time connection ───────────────────────
+    const pusher  = new Pusher(PUSHER_CONFIG.key, { cluster: PUSHER_CONFIG.cluster });
     const channel = pusher.subscribe(PUSHER_CHANNEL);
 
     pusher.connection.bind("connecting",   () => setConnectionStatus("connecting"));
@@ -98,6 +109,7 @@ export function useSensorData() {
     channel.bind(PUSHER_EVENT, (data) => processPayload(data));
 
     return () => {
+      clearInterval(keepWarm);
       channel.unbind_all();
       pusher.unsubscribe(PUSHER_CHANNEL);
       pusher.disconnect();
@@ -107,6 +119,7 @@ export function useSensorData() {
   const overallStatus = (() => {
     const statuses = SENSORS.map((s) => {
       const v = values[s.key];
+      if (v === null || v === undefined) return "good";
       if (v < s.thresholds.low || v > s.thresholds.high) return "critical";
       if (v < s.safe[0] || v > s.safe[1]) return "warning";
       return "good";
